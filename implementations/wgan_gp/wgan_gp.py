@@ -15,8 +15,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 import torch
-
-os.makedirs("images", exist_ok=True)
+import datasets
+import scipy.io
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
@@ -26,13 +26,17 @@ parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first 
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
 parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
-parser.add_argument("--img_size", type=int, default=28, help="size of each image dimension")
-parser.add_argument("--channels", type=int, default=1, help="number of image channels")
+parser.add_argument("--img_size", type=int, default=64, help="size of each image dimension")
+parser.add_argument("--channels", type=int, default=21, help="number of image channels")
 parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
 parser.add_argument("--clip_value", type=float, default=0.01, help="lower and upper clip value for disc. weights")
-parser.add_argument("--sample_interval", type=int, default=400, help="interval betwen image samples")
+parser.add_argument("--sample_interval", type=int, default=10, help="interval betwen image samples")
 opt = parser.parse_args()
 print(opt)
+
+model = 'wgan-gp_s3_%s_%s_%s_%s_%s_%s_%s_%s' % (opt.n_epochs, opt.n_critic, opt.batch_size, opt.lr, opt.b1, opt.b2, opt.latent_dim, opt.clip_value)
+os.makedirs('results/' + model + '/predict', exist_ok=True)
+os.makedirs('results/' + model + '/save', exist_ok=True)
 
 img_shape = (opt.channels, opt.img_size, opt.img_size)
 
@@ -95,17 +99,11 @@ if cuda:
     discriminator.cuda()
 
 # Configure data loader
-os.makedirs("../../data/mnist", exist_ok=True)
-dataloader = torch.utils.data.DataLoader(
-    datasets.MNIST(
-        "../../data/mnist",
-        train=True,
-        download=True,
-        transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]),
-    ),
-    batch_size=opt.batch_size,
-    shuffle=True,
-)
+MI = datasets.forName('MI')
+trainset = MI(data_type='train')
+testset = MI(data_type='test', cfg=trainset.cfg, ms=trainset.ms, transform=trainset.transform, target_transform=trainset.target_transform)
+dataloader = DataLoader(trainset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu)
+val_dataloader = DataLoader(testset, batch_size=5, shuffle=True, num_workers=0)
 
 # Optimizers
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
@@ -142,7 +140,7 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
 
 batches_done = 0
 for epoch in range(opt.n_epochs):
-    for i, (imgs, _) in enumerate(dataloader):
+    for i, (_, imgs, _) in enumerate(dataloader):
 
         # Configure input
         real_imgs = Variable(imgs.type(Tensor))
@@ -195,7 +193,11 @@ for epoch in range(opt.n_epochs):
                 % (epoch, opt.n_epochs, i, len(dataloader), d_loss.item(), g_loss.item())
             )
 
-            if batches_done % opt.sample_interval == 0:
-                save_image(fake_imgs.data[:25], "images/%d.png" % batches_done, nrow=5, normalize=True)
+    z = Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))).cuda()
+    fake_B = generator(z)
+    img_sample = {'fake_B': np.array(fake_B.data)}
+    scipy.io.savemat('results/%s/predict/%s' % (model, epoch), img_sample)
 
-            batches_done += opt.n_critic
+    if epoch % opt.sample_interval == 0:
+        torch.save(generator.state_dict(), 'results/%s/save/G_%d.pth' % (model, epoch))
+        torch.save(discriminator.state_dict(), 'results/%s/save/D_%d.pth' % (model, epoch))

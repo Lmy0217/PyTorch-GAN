@@ -7,5 +7,7 @@
 data/*/
 implementations/*/images
 implementations/*/saved_models
+results
+.idea
 
 __pycache__

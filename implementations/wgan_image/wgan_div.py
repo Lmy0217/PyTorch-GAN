@@ -25,7 +25,7 @@ parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rat
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--n_cpu", type=int, default=8, help="number of cpu threads to use during batch generation")
-parser.add_argument("--latent_dim", type=int, default=100, help="dimensionality of the latent space")
+parser.add_argument("--latent_dim", type=int, default=64*64*21, help="dimensionality of the latent space")
 parser.add_argument("--img_size", type=int, default=64, help="size of each image dimension")
 parser.add_argument("--channels", type=int, default=21, help="number of image channels")
 parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
@@ -34,7 +34,7 @@ parser.add_argument("--sample_interval", type=int, default=10, help="interval be
 opt = parser.parse_args()
 print(opt)
 
-model = 'wgan-div_s3_%s_%s_%s_%s_%s_%s_%s_%s' % (opt.n_epochs, opt.n_critic, opt.batch_size, opt.lr, opt.b1, opt.b2, opt.latent_dim, opt.clip_value)
+model = 'wgan-div-image_s3_%s_%s_%s_%s_%s_%s_%s_%s' % (opt.n_epochs, opt.n_critic, opt.batch_size, opt.lr, opt.b1, opt.b2, opt.latent_dim, opt.clip_value)
 os.makedirs('results/' + model + '/predict', exist_ok=True)
 os.makedirs('results/' + model + '/save', exist_ok=True)
 
@@ -63,8 +63,9 @@ class Generator(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, z):
-        img = self.model(z)
+    def forward(self, img):
+        img = img.view(img.shape[0], -1)
+        img = self.model(img)
         img = img.view(img.shape[0], *img_shape)
         return img
 
@@ -118,7 +119,7 @@ Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 
 batches_done = 0
 for epoch in range(opt.n_epochs):
-    for i, (_, imgs, _) in enumerate(dataloader):
+    for i, (smri, imgs, _) in enumerate(dataloader):
 
         # Configure input
         real_imgs = Variable(imgs.type(Tensor),requires_grad=True)
@@ -130,10 +131,10 @@ for epoch in range(opt.n_epochs):
         optimizer_D.zero_grad()
 
         # Sample noise as generator input
-        z = Variable(Tensor(np.random.normal(0, 1, (imgs.shape[0], opt.latent_dim))))
+        smri = Variable(smri.type(Tensor))
 
         # Generate a batch of images
-        fake_imgs = generator(z)
+        fake_imgs = generator(smri)
 
         # Real images
         real_validity = discriminator(real_imgs)
@@ -177,7 +178,7 @@ for epoch in range(opt.n_epochs):
             # -----------------
 
             # Generate a batch of images
-            fake_imgs = generator(z)
+            fake_imgs = generator(smri)
             # Loss measures generator's ability to fool the discriminator
             # Train on fake images
             fake_validity = discriminator(fake_imgs)
